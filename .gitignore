@@ -1,0 +1,41 @@
+# Environment & Secrets
+.env
+*.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+
+# Testing & Caches
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Logs & Storage
+logs/
+*.log
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+
+# IDEs & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Airflow local state
+standalone_admin_password.txt
+airflow.cfg
+airflow.db
+webserver_config.py

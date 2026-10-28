@@ -1,0 +1,7 @@
+{
+ "project": "Smart Warehouse Intelligence Platform on AWS",
+ "version": "1.0",
+ "currency": "EGP",
+ "timezone": "Africa/Cairo",
+ "default_profile": "medium"
+}

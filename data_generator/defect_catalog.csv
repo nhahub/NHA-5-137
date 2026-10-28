@@ -1,0 +1,57 @@
+defect_id,table,column,description,rate,expected_action,injected_rows_full_profile
+DEF-BAT-001,product_batches,expiry_date,expiry before production date,0.001,reject,27
+DEF-BAT-002,product_batches,batch_number,batch number reused across products/suppliers,0.005,flag,133
+DEF-CAL-001,calendar_events,event_name,Eid event name variant / moon-sighting uncertainty,0.04,fix,2
+DEF-CAT-001,product_categories,category_name,whitespace / mixed case in category_name,0.25,fix,12
+DEF-CAT-002,product_categories,parent_category_id,orphan parent_category_id (CAT-99 does not exist),0.005,fix,1
+DEF-CST-001,product_costs,cost_per_base_unit_egp,cost above selling price (margin anomaly),0.004,flag,6
+DEF-CST-002,product_costs,effective_to,gap between consecutive cost periods,0.01,flag,16
+DEF-CUS-001,customers,segment,segment label variants (non-canonical),0.75,fix,1800
+DEF-CUS-002,customers,governorate,governorate misspelling,0.01,fix,24
+DEF-GR-001,goods_receipt_lines,purchase_order_id|po_line_no,blind receipt (no PO reference),0.003,flag,76
+DEF-GR-002,goods_receipt_lines,qty_received_uom,over-delivery versus ordered quantity,0.02,flag,504
+DEF-GR-003,goods_receipt_lines,expiry_date,expiry date before received date,0.001,reject,25
+DEF-INV-001,inventory_transactions,qty_change_base,sign error on quantity,0.001,flag,117
+DEF-INV-002,inventory_transactions,reference_id,missing reference_id,0.001,flag,117
+DEF-INV-003,inventory_transactions,reason_code,ADJUSTMENT without reason code,0.001,flag,117
+DEF-INV-004,inventory_transactions,posted_ts,posted_ts earlier than event_ts (clock skew),0.001,flag,117
+DEF-INV-005,inventory_transactions,,duplicate ledger event,0.003,fix,350
+DEF-PO-001,purchase_orders,,duplicate PO header,0.005,fix,94
+DEF-PO-002,purchase_orders,po_status,status lags reality (OPEN although goods received),0.01,fix,189
+DEF-PO-003,purchase_orders,po_status,CANCELLED PO that has receipts,0.001,flag,19
+DEF-POL-001,purchase_order_lines,promised_delivery_date,promised delivery date missing,0.06,flag,1445
+DEF-POL-002,purchase_order_lines,qty_ordered_uom,ordered quantity below supplier MOQ,0.003,flag,72
+DEF-PRC-001,product_prices,list_price_egp,list price = 0,0.001,reject,2
+DEF-PRC-002,product_prices,effective_to,effective_to before effective_from,0.001,reject,2
+DEF-PRC-003,product_prices,,overlapping validity window with conflicting price,0.005,flag,8
+DEF-PRD-001,products,sku_code,duplicate sku_code across two products,0.01,reject,8
+DEF-PRD-002,products,shelf_life_days,perishable product without shelf_life_days,0.02,flag,16
+DEF-PRD-003,products,brand,mixed case / whitespace in brand,0.15,fix,120
+DEF-PRD-004,products,barcode_ean13,invalid EAN-13 check digit,0.01,flag,8
+DEF-PRM-001,promotions,end_date,end_date before start_date,0.003,reject,1
+DEF-PRM-002,promotions,,overlapping promotion on same product (higher discount),0.03,flag,6
+DEF-RET-001,sales_returns,return_ts,return timestamp before shipment,0.001,reject,2
+DEF-RET-002,sales_returns,qty_returned,qty_returned greater than qty_shipped,0.002,flag,4
+DEF-RET-003,sales_returns,sales_order_id,return references a non-existent order,0.003,reject,5
+DEF-RET-004,sales_returns,disposition,EXPIRED/DAMAGED return marked RESTOCK,0.05,fix,92
+DEF-SNP-001,inventory_snapshots,on_hand_qty,negative on_hand_qty,0.0005,flag,241
+DEF-SNP-002,inventory_snapshots,on_hand_qty|allocated_qty,stale copy of previous day's snapshot,0.005,flag,2409
+DEF-SNP-003,inventory_snapshots,,entire snapshot day missing,0.01,flag,4
+DEF-SO-001,sales_orders,,exact duplicate order header,0.004,fix,100
+DEF-SO-002,sales_orders,,stale older version of an order re-sent (keep latest source_updated_ts),0.03,fix,753
+DEF-SO-003,sales_orders,total_net_amount_egp,header total differs from sum of lines,0.003,flag,75
+DEF-SOL-001,sales_order_lines,,duplicate order line,0.003,fix,210
+DEF-SOL-003,sales_order_lines,qty_shipped,qty_shipped greater than qty_ordered,0.0005,flag,35
+DEF-SOL-004,sales_order_lines,qty_ordered,negative ordered quantity,0.0002,reject,14
+DEF-SOL-005,sales_order_lines,unit_net_price_egp,net price inconsistent with list price and discount,0.005,flag,351
+DEF-SOL-006,sales_order_lines,promo_id,promo_id missing while discount_pct > 0,0.01,flag,216
+DEF-SOL-007,sales_order_lines,line_status,line marked SHIPPED although qty_shipped < qty_ordered,0.005,flag,351
+DEF-SPR-001,supplier_products,contractual_lead_time_days,null contractual lead time,0.04,flag,66
+DEF-SPR-002,supplier_products,,overlapping effective range with different cost,0.005,flag,8
+DEF-SPR-003,supplier_products,is_primary,two primary suppliers for one product,0.003,flag,5
+DEF-STK-001,stockout_events,end_ts,episode never closed (end_ts missing),0.02,flag,58
+DEF-STK-002,stockout_events,,overlapping duplicate episode for same warehouse-product,0.03,fix,87
+DEF-SUP-001,suppliers,supplier_name,whitespace / case issues in supplier_name,0.2,fix,8
+DEF-SUP-002,suppliers,governorate,null governorate,0.01,flag,1
+DEF-WTH-001,weather_daily,temp_max_c|temp_min_c,temperature recorded in Fahrenheit,0.005,fix,11
+DEF-WTH-002,weather_daily,,missing observation day,0.01,flag,22

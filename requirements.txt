@@ -1,0 +1,10 @@
+# Apache Airflow Custom Providers & Dependencies
+# Amazon AWS Provider for S3, Glue, Athena, and EMR
+apache-airflow-providers-amazon>=9.0.0
+
+# AWS SDK and Core Libraries
+boto3>=1.34.0
+botocore>=1.34.0
+
+# Data Analysis and Validation
+pandas>=2.1.0
