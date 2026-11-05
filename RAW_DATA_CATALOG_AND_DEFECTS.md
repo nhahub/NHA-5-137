@@ -23,6 +23,8 @@
 7. [محرك التحقق والانحدار الصارم (Regression Validator — 41 Integrity Checks)](#7-محرك-التحقق-والانحدار-الصارم-regression-validator)
 8. [مسار الأتمتة الموحد في Apache Airflow (End-to-End Lakehouse DAG)](#8-مسار-الأتمتة-الموحد-في-apache-airflow-end-to-end-lakehouse-dag)
 9. [معمارية معالجة العيوب المنفذة في AWS Glue ومجلدات الحجر الصحي (Glue Remediation Architecture)](#9-معمارية-معالجة-العيوب-المنفذة-في-aws-glue-ومجلدات-الحجر-الصحي)
+10. [معمارية طبقة الذهب والتحليلات الذكية (Gold Analytical Layer & Star Schema)](#10-معمارية-طبقة-الذهب-والتحليلات-الذكية-gold-analytical-layer)
+
 
 ---
 
@@ -632,10 +634,21 @@ graph TD
         B_SYNC --> S3_JOB["Silver_03_inventory_ops<br/>(Ledger, Snapshots & Temp Fix)"]
     end
 
-    subgraph S7["المرحلة 8: اكتمال خط الأنابيب"]
-        S1_JOB --> FIN["9. pipeline_completed<br/>(Full Lakehouse Ready)"]
-        S2_JOB --> FIN
-        S3_JOB --> FIN
+    subgraph S7["المرحلة 8: حاجز مزامنة Silver"]
+        S1_JOB --> S_SYNC["9. silver_layer_completed<br/>(all_success barrier)"]
+        S2_JOB --> S_SYNC
+        S3_JOB --> S_SYNC
+    end
+
+    subgraph S8["المرحلة 9: تشغيل طبقة Gold للتحليلات"]
+        S_SYNC --> G1_JOB["Gold_01_dimensions<br/>(Conformed Star Dimensions)"]
+        G1_JOB --> G2_JOB["Gold_02_facts<br/>(Sales, Returns, Receipts & Inv Facts)"]
+        G2_JOB --> G3_JOB["Gold_03_business_marts<br/>(Executive & BI Dashboards)"]
+    end
+
+    subgraph S9["المرحلة 10: اكتمال خط الأنابيب"]
+        G3_JOB --> G_SYNC["10. gold_layer_completed<br/>(all_success barrier)"]
+        G_SYNC --> FIN["11. pipeline_completed<br/>(Full Lakehouse & Analytics Ready)"]
     end
 
     style G fill:#1e3a8a,stroke:#3b82f6,stroke-width:2px,color:#fff
@@ -646,6 +659,11 @@ graph TD
     style C fill:#991b1b,stroke:#ef4444,stroke-width:2px,color:#fff
     style P fill:#4338ca,stroke:#6366f1,stroke-width:2px,color:#fff
     style B_SYNC fill:#374151,stroke:#9ca3af,stroke-width:2px,color:#fff
+    style S_SYNC fill:#374151,stroke:#9ca3af,stroke-width:2px,color:#fff
+    style G1_JOB fill:#b45309,stroke:#f59e0b,stroke-width:2px,color:#fff
+    style G2_JOB fill:#b45309,stroke:#f59e0b,stroke-width:2px,color:#fff
+    style G3_JOB fill:#b45309,stroke:#f59e0b,stroke-width:2px,color:#fff
+    style G_SYNC fill:#374151,stroke:#9ca3af,stroke-width:2px,color:#fff
     style FIN fill:#059669,stroke:#10b981,stroke-width:2px,color:#fff
 ```
 
@@ -654,11 +672,17 @@ graph TD
 2. **`validate_raw_data_quality`**: فحص اكتمال الملفات وأحجامها والتأكد من عدم وجود ملفات فارغة قبل الشروع في الرفع.
 3. **الرفع المتوازي لـ S3**: توزيع الرفع إلى 3 مسارات متزامنة وفق نمط التقسيم المعتمد (Master/Snapshot، Transactions Partitioned، Event Streams).
 4. **`cleanup_local_raw_files`**: مسح الملفات الخام المحلية فور نجاح الرفع للحفاظ على مساحة التخزين في خادم Airflow.
-5. **`preflight_glue_check`**: التحقق من صلاحيات AWS، الاتصال بالـ Region، وتوافر الـ 6 Glue Jobs المعتمدة في البيئة السحابية.
+5. **`preflight_glue_check`**: التحقق من صلاحيات AWS، الاتصال بالـ Region، وتوافر وظائف AWS Glue الـ 9 المعتمدة (3 Bronze + 3 Silver + 3 Gold).
 6. **`Bronze Layer (Parallel)`**: تشغيل 3 وظائف Glue بالتوازي لقراءة ملفات Raw وكتابة جداول Iceberg للطبقة البرونزية.
 7. **`bronze_layer_completed`**: حاجز تزامن مشروط (`TriggerRule.ALL_SUCCESS`)؛ يمنع بدء أي وظيفة Silver إذا فشلت أي وظيفة برونزية.
 8. **`Silver Layer (Parallel)`**: تشغيل 3 وظائف Glue بالتوازي لتطبيق قواعد التنظيف ومعالجة العيوب المحقونة.
-9. **`pipeline_completed`**: مؤشر اكتمال خط الأنابيب بنجاح لكافة الطبقات.
+9. **`silver_layer_completed`**: حاجز تزامن مشروط يضمن نجاح واكتمال تنظيف طبقة Silver بالكامل قبل الشروع في بناء طبقة التحليلات Gold.
+10. **`Gold Layer (Sequential Pipeline)`**:
+    - `Gold_01_dimensions`: بناء الأبعاد الموحدة لنموذج النجمة (Star Schema Dimensions).
+    - `Gold_02_facts`: بناء جداول الحقائق الحبيبية (Sales, Returns, Procurement, Inventory Daily).
+    - `Gold_03_business_marts`: توليد أسواق البيانات المجمعة عالية الأداء للـ BI والداشبورد.
+11. **`gold_layer_completed`**: حاجز تزامن مشروط يؤكد اكتمال واستقرار جميع جداول Gold.
+12. **`pipeline_completed`**: مؤشر اكتمال خط الأنابيب بنجاح لكافة الطبقات الأربعة (Raw ➔ Bronze ➔ Silver ➔ Gold).
 
 ---
 
@@ -706,5 +730,68 @@ graph TD
     - اعتماد الأوامر الأحدث عبر `dedup_latest(..., ["sales_order_id"], "source_updated_ts")`، وإعادة احتساب صافي أسعار السطور والتحقق من تطبيق كود العرض `promo_id`.
 
 ---
+
+## 10. معمارية طبقة الذهب والتحليلات الذكية (Gold Analytical Layer)
+
+تم تصميم وبناء **طبقة الذهب (Gold Layer)** لتكون الطبقة الإنتاجية النهائية الموجهة مباشرة لذكاء الأعمال (Business Intelligence)، التحليلات المتقدمة (OLAP & Ad-hoc Analytics)، ولوحات المعلومات التنفيذية والتشغيلية (Amazon QuickSight / Power BI / Tableau / Athena).
+
+تتبع الطبقة معايير **نمذجة الأبعاد بمخطط النجمة (Kimball Star Schema Dimensional Modeling)** مع الحفاظ على الأداء الفائق والتقسيم الذكي في **Apache Iceberg v2**:
+
+### 🌟 الهيكل المعماري لطبقة الذهب:
+
+```
+glue_jobs/
+├── gold_rules.py                   # دوال التحويل الحسابية والتحليلية الصرفة (Pure DataFrames)
+└── gold/
+    ├── Gold_01_dimensions.py       # بناء وتحديث أبعاد نموذج النجمة (5 أبعاد موحدة)
+    ├── Gold_02_facts.py            # بناء وتحديث جداول الحقائق الحبيبية (4 حقائق رئيسية)
+    └── Gold_03_business_marts.py   # توليد أسواق البيانات التحليلية المجمعة (4 داتا مارت)
+```
+
+---
+
+### 1️⃣ الأبعاد الموحدة لنموذج النجمة (Conformed Dimensions):
+
+| اسم الجدول | المفتاح الأساسي / البديل | وصف المحتوى الهندسي ومصادر الربط |
+| :--- | :--- | :--- |
+| **`gold.dim_date`** | `date_key` (int: YYYYMMDD) | تقويم زمني تفصيلي يغطي 2023-2027، مراعياً خصوصية أسبوع العمل المصري (السبت-الخميس)، عطلة الجمعة (`is_weekend`)، ومدمجاً بأحداث التقويم والمواسم الدينية (رمضان، عيدي الفطر والأضحى). |
+| **`gold.dim_product`** | `product_key` (surrogate) | شجرة تصنيف الأصناف الكاملة (L1/L2)، الأوزان، وحدات القياس، نوع التخزين (جاف/مبرد)، معايير الصلاحية، وأحدث أسعار بيع وتكلفة وهوامش ربحية محسوبة. |
+| **`gold.dim_customer`** | `customer_key` (surrogate) | بيانات العملاء بعد توحيد المحافظات الـ 27 وتصنيف قنوات وشرائح التوزيع (سوبرماركت، هايبر، هوريكا، تجزئة، كشك)، والمستودع اللوجستي المخصص وفترات الائتمان. |
+| **`gold.dim_warehouse`** | `warehouse_key` (surrogate) | مراكز التوزيع اللوجستية المركزية الثلاثة (القاهرة/الجيزة WH01، الإسكندرية WH02، أسيوط WH03)، السعات التخزينية بالطبليات، ومناطق التبريد ومواعيد الإغلاق. |
+| **`gold.dim_supplier`** | `supplier_key` (surrogate) | الموردون المعتمدون، التصنيف المحلي/المستورد، شروط الدفع، والمحافظة المعتمدة. |
+
+---
+
+### 2️⃣ جداول الحقائق الحبيبية (Granular Fact Tables):
+
+| اسم الجدول | مستوى الحبيبية (Grain) | التقسيم (Partitioning) | المقاييس ومؤشرات الأداء المحسوبة |
+| :--- | :--- | :--- | :--- |
+| **`gold.fact_sales`** | سطر أمر البيع (`sales_order_id`, `line_no`) | شهري `months(order_date)` | الإيراد الإجمالي، قيمة الخصم، صافي المبيعات، تكلفة البضاعة المباعة (COGS)، إجمالي الربح والهامش الربحي %، مؤشرات الإيفاء الكامل، ونسبة العجز (`shortage_qty`). |
+| **`gold.fact_sales_returns`** | سطر المرتجع (`return_line_id`) | شهري `months(return_date)` | كمية المرتجع المعتمدة، قيمة الاسترداد (EGP)، الخسارة المالية للتالف/المنتهي الصلاحية، سبب الإرجاع، والتصرف المخزني (إعادة تخزين أم إعدام). |
+| **`gold.fact_procurement_receipts`** | سطر إذن الاستلام (`receipt_id`, `receipt_line_no`) | شهري `months(received_date)` | التوريد في الوقت وبالكامل (Vendor OTIF %)، نسبة الرفض عند الرصيف، فترة التوريد الفعلية والتعاقدية، والتكلفة الإجمالية المستلمة والمعتمدة. |
+| **`gold.fact_inventory_daily_balance`** | مستودع + صنف + يوم | شهري `months(snapshot_date)` | الرصيد المخزني المطابق لدفتر الأستاذ، المحجوز، المتاح للبيع، التقييم المالي للمخزون (EGP)، وحالات النفاد الصفرية. |
+
+---
+
+### 3️⃣ أسواق البيانات التحليلية المجمعة (Aggregated Business Data Marts):
+
+1. **`gold.mart_sales_and_margin_daily` (سوق المبيعات والربحية اليومي)**:
+   - **الأبعاد**: التاريخ، المستودع، تصنيف الصنف L1/L2، شريحة العميل، قناة البيع.
+   - **المؤشرات**: إجمالي الطلبات، الوحدات المطلوبة مقابل المشحونة، المبيعات الصافية، إجمالي الربح، هامش الربح %، متوسط قيمة الطلب (AOV)، نسبة الإيفاء الإجمالية %، وإيرادات العروض الترويجية وحصتها من البيع.
+
+2. **`gold.mart_supplier_performance` (سوق تقييم أداء الموردين - Scorecard)**:
+   - **الأبعاد**: كود واسم المورد، نوع التوريد، المحافظة، الشهر والسنة.
+   - **المؤشرات**: إجمالي أوامر الشراء، الوحدات المطلوبة والمستلمة، نسبة الالتزام بالتوريد الكامل وفي الموعد (OTIF Rate %)، نسبة الجودة والقبول % مقابل الرفض %، متوسط مهلة التوريد الفعلية بالأيام، وإجمالي الإنفاق.
+
+3. **`gold.mart_inventory_health_and_risk` (سوق صحة المخزون ومخاطر الصلاحية)**:
+   - **الأبعاد**: المستودع، الصنف، الفئة، نوع التخزين، القابلية للتلف.
+   - **المؤشرات**: الرصيد المتاح الحالي، معدل المبيعات اليومي (30 يوماً)، أيام كفاية المخزون (Days of Supply - DOH)، تصنيف حالة المخزون (`CRITICAL_LOW`, `HEALTHY`, `OVERSTOCKED`, `OUT_OF_STOCK`)، خسائر المبيعات التقديرية أثناء النفاد، وكميات وقيم المخزون المهدد بالانتهاء خلال 30 و 60 و 90 يوماً (FEFO Risk Analysis).
+
+4. **`gold.mart_warehouse_operations_daily` (سوق العمليات اللوجستية وتأثير الطقس)**:
+   - **الأبعاد**: تاريخ التشغيل، المستودع، المحافظة، السعة القصوى.
+   - **المؤشرات**: حركة الواردات اليومية، حركة الصادرات المشحونة، حركات المرتجعات، نسبة إشغال الطبليات بالمستودع %، درجات الحرارة العظمى والصغرى، وتنبيهات موجات الحر الشديدة (>= 40°C) لحماية البضائع الحساسة والمبردة.
+
+---
 **تم تحديث وتدقيق هذا الدليل ليكون المرجع الفني والهندسي الرسمي الشامل لمنصة ذكاء المستودعات وسلاسل الإمداد على AWS** 🚀
+
 

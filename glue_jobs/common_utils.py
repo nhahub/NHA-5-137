@@ -503,3 +503,32 @@ def publish_silver(spark, df, table, keys, mode, q, wm=None, order_col=None, key
     else:
         raise ValueError(mode)
     print(f"[silver] {table}: {mode} done")
+
+
+def publish_gold(spark, df, table, keys=None, mode="replace", order_col=None, partition=None):
+    """
+    Publish to the Gold layer (glue_catalog.gold.<table>).
+    mode  "replace"         table fully replaced (atomic, dimensions and aggregated marts)
+          "upsert"          MERGE on keys (update existing, insert new)
+          "insert_only"     MERGE on keys, existing rows untouched
+    """
+    ensure_namespace(spark, "gold")
+    target = tbl("gold", table)
+    if mode != "replace" and is_empty(df):
+        print(f"[gold] {table}: empty batch, skipping write")
+        return
+
+    if mode == "replace":
+        w = df.writeTo(target).using("iceberg").tableProperty("format-version", "2")
+        w = w.tableProperty("location", _location(target))
+        if partition:
+            w = w.partitionedBy(*partition)
+        w.createOrReplace()
+    elif mode == "upsert":
+        upsert_iceberg(spark, df, target, keys, order_col, True, partition)
+    elif mode == "insert_only":
+        upsert_iceberg(spark, df, target, keys, None, False, partition)
+    else:
+        raise ValueError(f"[gold] Unsupported publish mode: {mode}")
+    print(f"[gold] {table}: {mode} done")
+

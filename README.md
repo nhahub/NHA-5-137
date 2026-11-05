@@ -32,12 +32,16 @@ graph TD
         BRONZE_ICEBERG[("Bronze Iceberg Tables<br/>(Append-Only RAW Copies)")]
         GLUE_SILVER["AWS Glue: Silver Jobs (x3)<br/>(Taxonomy Remediation & DQDL)"]
         SILVER_ICEBERG[("Silver Iceberg Tables<br/>(Cleansed, Enriched & Conformed)")]
+        GLUE_GOLD["AWS Glue: Gold Jobs (x3)<br/>(Star Schema & Business Marts)"]
+        GOLD_ICEBERG[("Gold Iceberg Tables<br/>(Analytics & Dashboard Ready)")]
 
         S3_INGEST --> S3_RAW
         S3_RAW --> GLUE_BRONZE
         GLUE_BRONZE --> BRONZE_ICEBERG
         BRONZE_ICEBERG --> GLUE_SILVER
         GLUE_SILVER --> SILVER_ICEBERG
+        SILVER_ICEBERG --> GLUE_GOLD
+        GLUE_GOLD --> GOLD_ICEBERG
     end
 
     VAL --> DAG
@@ -59,11 +63,12 @@ graph TD
 
 3. **Automated End-to-End Orchestration**:
    - Orchestrated via Airflow DAG: `smart_warehouse_lakehouse_end_to_end`.
-   - Executes 8 cohesive stages: Local Data Generation ➔ Quality Pre-Flight ➔ 3-Way S3 Ingestion ➔ Local Cleanup ➔ Glue Pre-Flight ➔ 3 Concurrent Bronze Jobs ➔ Barrier Sync ➔ 3 Concurrent Silver Jobs.
+   - Executes 11 cohesive stages: Local Data Generation ➔ Quality Pre-Flight ➔ 3-Way S3 Ingestion ➔ Local Cleanup ➔ Glue Pre-Flight (9 Jobs) ➔ 3 Concurrent Bronze Jobs ➔ Barrier Sync ➔ 3 Concurrent Silver Jobs ➔ Barrier Sync ➔ 3 Gold Pipeline Jobs (Dimensions, Facts, Marts) ➔ Pipeline Completed.
 
 4. **Production-Ready PySpark & AWS Glue Lakehouse**:
    - **Bronze Layer**: Schema enforcement, type safety, and automatic routing of corrupt lines to `quarantine.rejected_rows`.
    - **Silver Layer**: Pure transformation rules in `silver_rules.py` repairing data, generating positive surrogate keys via `pmod(xxhash64)`, fuzzy-matching Egyptian governorates (Levenshtein distance), and enforcing three-valued logic.
+   - **Gold Layer**: Kimball Star Schema dimensional modeling & analytical business marts in `gold_rules.py` (Conformed Dimensions, Fact Sales, Returns, Vendor OTIF Receipts, Daily Inventory Valuation, and Executive Marts for Sales, Supplier Scorecards, Inventory Expiry Risk, and DC Operations).
 
 ---
 
@@ -71,7 +76,7 @@ graph TD
 
 ```
 ├── dags/
-│   └── dag_raw_ingestion_s3.py     # Main end-to-end Airflow DAG
+│   └── dag_raw_ingestion_s3.py     # Main end-to-end Airflow DAG (Bronze -> Silver -> Gold)
 ├── data_generator/                 # Simulation engine & defect injector
 │   ├── config.py                   # Profile settings & warehouse mapping
 │   ├── defect_catalog.csv          # Catalog of all 56 formal defects
@@ -81,12 +86,14 @@ graph TD
 │   └── tables/                     # Reference, Master, Commercial & Simulation tables
 ├── glue_jobs/                      # AWS Glue & PySpark ETL scripts
 │   ├── lakehouse_config.py         # 21-table typed schemas and DQDL rules
-│   ├── silver_rules.py             # Pure functional data cleaning rules
-│   ├── common_utils.py             # Shared PySpark UDFs & utilities
+│   ├── silver_rules.py             # Pure functional data cleaning rules (Silver)
+│   ├── gold_rules.py               # Pure analytical & dimensional rules (Gold)
+│   ├── common_utils.py             # Shared PySpark UDFs & Iceberg publishers
 │   ├── bronze/                     # Bronze Glue jobs (01, 02, 03)
-│   └── silver/                     # Silver Glue jobs (01, 02, 03)
+│   ├── silver/                     # Silver Glue jobs (01, 02, 03)
+│   └── gold/                       # Gold Glue jobs (01 dimensions, 02 facts, 03 marts)
 ├── docker-compose.yaml             # Local Apache Airflow stack
-├── RAW_DATA_CATALOG_AND_DEFECTS.md # Engineering catalog & schema specification
+├── RAW_DATA_CATALOG_AND_DEFECTS.md # Engineering catalog, schema specification & Gold Marts
 └── requirements.txt                # Python package dependencies
 ```
 

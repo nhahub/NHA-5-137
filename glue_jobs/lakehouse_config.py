@@ -217,3 +217,26 @@ BRONZE_JOBS = {
     "bronze_03_inventory_ops": ["inventory_transactions", "inventory_snapshots", "stockout_events",
                                 "weather_daily"],
 }
+
+GOLD_JOBS = {
+    "Gold_01_dimensions": [
+        "dim_date",
+        "dim_product",
+        "dim_customer",
+        "dim_warehouse",
+        "dim_supplier",
+    ],
+    "Gold_02_facts": [
+        "fact_sales",
+        "fact_sales_returns",
+        "fact_procurement_receipts",
+        "fact_inventory_daily_balance",
+    ],
+    "Gold_03_business_marts": [
+        "mart_sales_and_margin_daily",
+        "mart_supplier_performance",
+        "mart_inventory_health_and_risk",
+        "mart_warehouse_operations_daily",
+    ],
+}
+

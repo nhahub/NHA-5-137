@@ -22,13 +22,19 @@ Complete Architecture & Workflow:
                             - Silver_01_master_commercial (Cleansing, deduplication, surrogate keys -> Silver Iceberg)
                             - Silver_02_transactions      (Fact tables, headers/lines rollups, order merge -> Silver Iceberg)
                             - Silver_03_inventory_ops     (Ledger, snapshots roll-forward, temperature fix -> Silver Iceberg)
-9. [Pipeline Completion]  : Final validation marker confirming successful end-to-end lakehouse run.
+9. [Silver Sync Barrier]  : Synchronization point (all_success). Guarantees all Silver jobs succeed before Gold starts.
+10. [Gold Layer Execution]: Executes all 3 Gold AWS Glue Jobs (Star Schema & Marts):
+                            - Gold_01_dimensions         (Conformed Dimensions: date, product, customer, warehouse, supplier)
+                            - Gold_02_facts              (Granular Facts: fact_sales, returns, receipts, daily inventory)
+                            - Gold_03_business_marts     (Executive Marts: sales & margin, supplier OTIF, inventory risk, DC ops)
+11. [Gold Sync Barrier]   : Synchronization point (all_success) confirming all Gold tables are ready.
+12. [Pipeline Completion] : Final validation marker confirming successful end-to-end lakehouse run.
 
 Core Principles:
 ================================================================================
 - ZERO Hardcoding: S3 buckets, AWS regions, and credentials dynamically sourced from .env on every run.
 - True Parallelism: 3 S3 upload streams run concurrently; 3 Bronze jobs run concurrently; 3 Silver jobs run concurrently.
-- Strict Integrity: Silver jobs will NEVER run if any Bronze job fails or encounters an unhandled exception.
+- Strict Integrity: Silver will NEVER run if any Bronze fails; Gold will NEVER run if any Silver fails.
 """
 
 import os
@@ -124,6 +130,13 @@ GLUE_JOBS_SILVER = [
     "Silver_02_transactions",
     "Silver_03_inventory_ops",
 ]
+
+GLUE_JOBS_GOLD = [
+    "Gold_01_dimensions",
+    "Gold_02_facts",
+    "Gold_03_business_marts",
+]
+
 
 
 # ==============================================================================
@@ -437,8 +450,8 @@ def preflight_glue_check(**context):
 
     client = boto3.client("glue", **session_kwargs)
 
-    all_jobs = GLUE_JOBS_BRONZE + GLUE_JOBS_SILVER
-    print(f"\n  Checking readiness for {len(all_jobs)} AWS Glue Jobs...")
+    all_jobs = GLUE_JOBS_BRONZE + GLUE_JOBS_SILVER + GLUE_JOBS_GOLD
+    print(f"\n  Checking readiness for {len(all_jobs)} AWS Glue Jobs (Bronze, Silver, Gold)...")
 
     missing_jobs = []
     for job_name in all_jobs:
@@ -462,7 +475,7 @@ def preflight_glue_check(**context):
         )
 
     print("================================================================================")
-    print("  [PRE-FLIGHT SUCCESS] All 6 AWS Glue Jobs are verified and ready to run!        ")
+    print(f"  [PRE-FLIGHT SUCCESS] All {len(all_jobs)} AWS Glue Jobs are verified and ready to run!        ")
     print("================================================================================\n")
     return True
 
@@ -483,7 +496,8 @@ with DAG(
     dag_id="smart_warehouse_lakehouse_end_to_end",
     default_args=DEFAULT_ARGS,
     description="End-to-End: Raw Ingestion -> S3 -> Bronze (Parallel) -> Barrier -> Silver (Parallel)",
-    schedule="@daily",
+    # schedule="@daily",
+    schedule=None,
     start_date=datetime(2024, 1, 1),
     catchup=False,
     max_active_runs=1,
@@ -545,7 +559,9 @@ with DAG(
     glue_script_args = {
         "--RAW_S3_PATH": f"s3://{s3_bucket_name}/raw",
         "--WAREHOUSE_S3_PATH": f"s3://{s3_bucket_name}",
+        "--datalake-formats": "iceberg",
     }
+
 
     # --------------------------------------------------------------------------
     # Stage 5: Bronze Layer (3 AWS Glue Jobs Running in Parallel)
@@ -628,7 +644,59 @@ with DAG(
     )
 
     # --------------------------------------------------------------------------
-    # Stage 8: Pipeline Completion Marker
+    # Stage 8: Synchronization Barrier (Silver Completed - all_success required)
+    # --------------------------------------------------------------------------
+    t_silver_completed = EmptyOperator(
+        task_id="silver_layer_completed",
+        trigger_rule=TriggerRule.ALL_SUCCESS,
+    )
+
+    # --------------------------------------------------------------------------
+    # Stage 9: Gold Layer (Star Schema Dimensions, Granular Facts & Business Marts)
+    # --------------------------------------------------------------------------
+    t_gold_01 = GlueJobOperator(
+        task_id="glue_gold_01_dimensions",
+        job_name="Gold_01_dimensions",
+        script_args=glue_script_args,
+        region_name=AWS_REGION,
+        aws_conn_id=AWS_CONN_ID,
+        wait_for_completion=True,
+        verbose=False,
+        job_poll_interval=15,
+    )
+
+    t_gold_02 = GlueJobOperator(
+        task_id="glue_gold_02_facts",
+        job_name="Gold_02_facts",
+        script_args=glue_script_args,
+        region_name=AWS_REGION,
+        aws_conn_id=AWS_CONN_ID,
+        wait_for_completion=True,
+        verbose=False,
+        job_poll_interval=15,
+    )
+
+    t_gold_03 = GlueJobOperator(
+        task_id="glue_gold_03_business_marts",
+        job_name="Gold_03_business_marts",
+        script_args=glue_script_args,
+        region_name=AWS_REGION,
+        aws_conn_id=AWS_CONN_ID,
+        wait_for_completion=True,
+        verbose=False,
+        job_poll_interval=15,
+    )
+
+    # --------------------------------------------------------------------------
+    # Stage 10: Gold Synchronization Barrier
+    # --------------------------------------------------------------------------
+    t_gold_completed = EmptyOperator(
+        task_id="gold_layer_completed",
+        trigger_rule=TriggerRule.ALL_SUCCESS,
+    )
+
+    # --------------------------------------------------------------------------
+    # Stage 11: Pipeline Completion Marker
     # --------------------------------------------------------------------------
     t_pipeline_completed = EmptyOperator(
         task_id="pipeline_completed",
@@ -656,5 +724,12 @@ with DAG(
     # 6. Synchronization Barrier -> Parallel Silver Execution
     t_bronze_completed >> [t_silver_01, t_silver_02, t_silver_03]
 
-    # 7. Parallel Silver Execution -> Pipeline Completed
-    [t_silver_01, t_silver_02, t_silver_03] >> t_pipeline_completed
+    # 7. Parallel Silver Execution -> Silver Synchronization Barrier
+    [t_silver_01, t_silver_02, t_silver_03] >> t_silver_completed
+
+    # 8. Silver Barrier -> Gold Dimensions -> Gold Facts -> Gold Marts -> Gold Barrier
+    t_silver_completed >> t_gold_01 >> t_gold_02 >> t_gold_03 >> t_gold_completed
+
+    # 9. Gold Barrier -> Final Pipeline Completed Marker
+    t_gold_completed >> t_pipeline_completed
+
